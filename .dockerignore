@@ -1,0 +1,8 @@
+.git
+.codex
+node_modules
+dist
+coverage
+npm-debug.log*
+test
+README.md
