@@ -60,6 +60,32 @@ test('POST /v1/chat/completions returns non-streaming completion', async () => {
   expect(payload.choices[0].message.content).toMatch(/authorization_forwarded=true/);
 });
 
+test('POST /v1/chat/completions accepts text content parts from OpenAI clients', async () => {
+  const app = createApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/chat/completions',
+    payload: {
+      model: 'dummy/echo-1',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'hello' },
+            { type: 'text', text: 'proxy' },
+          ],
+        },
+      ],
+    },
+  });
+
+  expect(response.statusCode).toBe(200);
+  const payload = response.json();
+  expect(payload.object).toBe('chat.completion');
+  expect(payload.choices[0].message.content).toMatch(/hello\nproxy/);
+});
+
 test('POST /v1/chat/completions streams SSE chunks and [DONE]', async () => {
   const app = createApp();
 
@@ -84,6 +110,31 @@ test('POST /v1/chat/completions streams SSE chunks and [DONE]', async () => {
   expect(response.body).toMatch(/data: \[DONE\]/);
 });
 
+test('POST /v1/chat/completions streams with text content parts from OpenAI clients', async () => {
+  const app = createApp();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/chat/completions',
+    payload: {
+      model: 'dummy/echo-1',
+      stream: true,
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'dd' }],
+        },
+      ],
+    },
+  });
+
+  expect(response.statusCode).toBe(200);
+  expect(response.headers['content-type'] ?? '').toMatch(/^text\/event-stream/);
+  expect(response.body).toMatch(/"content":"Dummy"/);
+  expect(response.body).toMatch(/\\"dd\\"/);
+  expect(response.body).toMatch(/data: \[DONE\]/);
+});
+
 test('unknown provider prefix returns OpenAI-style not found error', async () => {
   const app = createApp();
 
@@ -102,7 +153,7 @@ test('unknown provider prefix returns OpenAI-style not found error', async () =>
   expect(payload.error.code).toBe('provider_not_found');
 });
 
-test('unsupported message content shape is rejected by request schema', async () => {
+test('unsupported non-text message content shape is rejected by request schema', async () => {
   const app = createApp();
 
   const response = await app.inject({
@@ -110,7 +161,19 @@ test('unsupported message content shape is rejected by request schema', async ()
     url: '/v1/chat/completions',
     payload: {
       model: 'dummy/echo-1',
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'https://example.com/image.png',
+              },
+            },
+          ],
+        },
+      ],
     },
   });
 

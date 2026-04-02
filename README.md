@@ -90,6 +90,25 @@ curl http://localhost:3000/v1/chat/completions \
   }'
 ```
 
+OpenAI client 스타일의 text part array도 지원:
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "dummy/echo-1",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "hello" },
+          { "type": "text", "text": "proxy" }
+        ]
+      }
+    ]
+  }'
+```
+
 ## 지원 범위
 
 지원 필드:
@@ -107,12 +126,12 @@ curl http://localhost:3000/v1/chat/completions \
 지원 메시지 형태:
 
 - role: `system | user | assistant`
-- content: 문자열만 지원
+- content: 문자열 또는 `[{ "type": "text", "text": "..." }]` 형태의 text part array 지원
 
 현재 제외:
 
 - `tools`, `tool_choice`
-- multimodal content array
+- image/audio/file이 포함된 multimodal content array
 - audio
 - function calling
 - structured outputs

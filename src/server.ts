@@ -92,6 +92,7 @@ export function buildServer(logger?: FastifyBaseLogger): FastifyInstance {
     ajv: {
       customOptions: {
         allErrors: true,
+        allowUnionTypes: true,
         removeAdditional: false,
       },
     },

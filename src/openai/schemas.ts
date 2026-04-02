@@ -1,8 +1,13 @@
 export type SupportedMessageRole = 'system' | 'user' | 'assistant';
 
+export type SupportedTextContentPart = {
+  type: 'text';
+  text: string;
+};
+
 export type SupportedChatMessage = {
   role: SupportedMessageRole;
-  content: string;
+  content: string | SupportedTextContentPart[];
 };
 
 export type SupportedChatCompletionRequest = {
@@ -29,14 +34,9 @@ export const chatCompletionsRequestSchema = {
     max_tokens: { type: 'integer', minimum: 1 },
     max_completion_tokens: { type: 'integer', minimum: 1 },
     stop: {
-      anyOf: [
-        { type: 'string' },
-        {
-          type: 'array',
-          items: { type: 'string' },
-          minItems: 1,
-        },
-      ],
+      type: ['string', 'array'],
+      items: { type: 'string' },
+      minItems: 1,
     },
     user: { type: 'string' },
     messages: {
@@ -52,8 +52,18 @@ export const chatCompletionsRequestSchema = {
             enum: ['system', 'user', 'assistant'],
           },
           content: {
-            type: 'string',
+            type: ['string', 'array'],
             minLength: 1,
+            minItems: 1,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'text'],
+              properties: {
+                type: { enum: ['text'] },
+                text: { type: 'string', minLength: 1 },
+              },
+            },
           },
         },
       },

@@ -13,6 +13,19 @@ function completionId(): string {
   return `chatcmpl_dummy_${Math.random().toString(36).slice(2, 12)}`;
 }
 
+function flattenTextContent(content: OpenAI.Chat.ChatCompletionMessageParam['content']): string | null {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const textParts = content.flatMap((part) => (part.type === 'text' ? [part.text] : []));
+  return textParts.length > 0 ? textParts.join('\n') : null;
+}
+
 function getLastUserMessage(request: OpenAI.Chat.ChatCompletionCreateParams): string {
   const userMessage = [...request.messages]
     .reverse()
@@ -27,16 +40,18 @@ function getLastUserMessage(request: OpenAI.Chat.ChatCompletionCreateParams): st
     );
   }
 
-  if (typeof userMessage.content !== 'string') {
+  const content = flattenTextContent(userMessage.content);
+
+  if (content === null) {
     throw new OpenAIProxyError(
       400,
       'invalid_request_error',
-      'Dummy provider only supports string message content.',
+      'Dummy provider only supports text message content.',
       'unsupported_message_content',
     );
   }
 
-  return userMessage.content;
+  return content;
 }
 
 function buildAssistantContent(
