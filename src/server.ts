@@ -70,7 +70,7 @@ function createAbortSignal(request: FastifyRequest): AbortSignal {
   const controller = new AbortController();
 
   request.raw.on('close', () => {
-    if (request.raw.aborted) {
+    if (request.raw.destroyed) {
       controller.abort();
     }
   });
