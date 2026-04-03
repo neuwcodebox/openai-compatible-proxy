@@ -66,14 +66,36 @@ function toOpenAIRequest(
   return withOptionalFields;
 }
 
-function createAbortSignal(request: FastifyRequest): AbortSignal {
+export function createAbortSignal(request: FastifyRequest, reply: FastifyReply): AbortSignal {
   const controller = new AbortController();
-
-  request.raw.on('close', () => {
-    if (request.raw.destroyed) {
+  const onAborted = () => {
+    controller.abort();
+  };
+  const onRequestClose = () => {
+    if (request.raw.aborted) {
       controller.abort();
     }
-  });
+  };
+  const onResponseClose = () => {
+    if (!reply.raw.writableEnded) {
+      controller.abort();
+    }
+  };
+  const onResponseFinish = () => {
+    cleanup();
+  };
+  const cleanup = () => {
+    request.raw.off('aborted', onAborted);
+    request.raw.off('close', onRequestClose);
+    reply.raw.off('close', onResponseClose);
+    reply.raw.off('finish', onResponseFinish);
+  };
+
+  request.raw.on('aborted', onAborted);
+  request.raw.on('close', onRequestClose);
+  reply.raw.on('close', onResponseClose);
+  reply.raw.on('finish', onResponseFinish);
+  controller.signal.addEventListener('abort', cleanup, { once: true });
 
   return controller.signal;
 }
@@ -129,7 +151,7 @@ export function buildServer(logger?: FastifyBaseLogger): FastifyInstance {
     const context = createProviderContext({
       headers: request.headers,
       requestId: request.id,
-      signal: createAbortSignal(request),
+      signal: createAbortSignal(request, reply),
       logger: request.log,
     });
 
@@ -153,7 +175,7 @@ export function buildServer(logger?: FastifyBaseLogger): FastifyInstance {
       const context = createProviderContext({
         headers: request.headers as IncomingHttpHeaders,
         requestId: request.id,
-        signal: createAbortSignal(request),
+        signal: createAbortSignal(request, reply),
         logger: request.log,
       });
       const provider = resolveProvider(input.model);
