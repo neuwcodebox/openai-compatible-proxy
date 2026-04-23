@@ -122,21 +122,67 @@ curl http://localhost:3000/v1/chat/completions \
 - `max_completion_tokens`
 - `stop`
 - `user`
+- `tools`
+- `tool_choice`
 
 지원 메시지 형태:
 
-- role: `system | user | assistant`
+- role: `system | user | assistant | tool`
 - content: 문자열 또는 `[{ "type": "text", "text": "..." }]` 형태의 text part array 지원
+- `role: tool` 메시지는 `tool_call_id` + 문자열 content만 지원
 
 현재 제외:
 
-- `tools`, `tool_choice`
 - image/audio/file이 포함된 multimodal content array
 - audio
-- function calling
 - structured outputs
 
 제외한 필드는 `400 invalid_request_error`로 거절합니다.
+
+## Tool Calling 지원 방식
+
+- provider가 네이티브 tool calling을 지원하면 그대로 provider로 전달합니다.
+- provider가 네이티브 tool calling을 지원하지 않는데 `tools`가 들어오면, 프록시가 **에뮬레이션 모드**로 동작합니다.
+  - 시스템 프롬프트에 tool schema와 호출/결과 처리 플로우를 주입합니다.
+  - provider가 도구 호출이 필요하다고 판단하면 응답을 `[tool-call]`로 시작하고 뒤에 JSON 본문을 붙입니다. 프록시는 이를 OpenAI 형식(`tool_calls`)으로 변환합니다.
+  - 도구 호출이 필요하지 않다면 provider는 일반 텍스트를 그대로 출력할 수 있습니다.
+  - `[tool-result]`를 받은 뒤에는 바로 최종 답변을 만들 수도 있고, 필요하면 추가 도구를 연속 호출할 수도 있습니다.
+  - 클라이언트가 보낸 `role: tool` 메시지는 provider 입력 시 `role: user` 텍스트로 변환해 전달합니다.
+  - 클라이언트가 기존 `role: system` 메시지를 보낸 경우, 하나의 system 메시지로 병합됩니다. 기존 시스템 프롬프트를 먼저 유지하고, 뒤에 `[Additional system instructions]`를 붙입니다. 구분자는 `---`를 사용합니다.
+  - stream 모드에서는 응답 토큰을 짧은 윈도우로 버퍼링해 tool-call 프로토콜 여부를 판정한 뒤, tool 호출이면 구조화 chunk로 변환하고 아니면 원본 스트림을 그대로 흘려보냅니다.
+
+### 에뮬레이션 시 Provider 입력 컨텍스트 예시
+
+요청(요약):
+- `tools`: `lookup_weather`, `lookup_air_quality`
+- 대화: `서울 날씨 알려줘` → `lookup_weather` 호출 → tool 결과 수신
+
+Provider로 전달되는 메시지(개념 예시):
+
+```json
+[
+  {
+    "role": "system",
+    "content": "You can either answer normally in plain text, or request a tool call using JSON.\n...\ntool_choice:\n\"auto\"\ntools:\n[\n  {\n    \"type\": \"function\",\n    \"function\": {\n      \"name\": \"lookup_weather\",\n      \"description\": \"Lookup weather\"\n    }\n  },\n  {\n    \"type\": \"function\",\n    \"function\": {\n      \"name\": \"lookup_air_quality\",\n      \"description\": \"Lookup AQI\"\n    }\n  }\n]"
+  },
+  {
+    "role": "user",
+    "content": "서울 날씨 알려줘"
+  },
+  {
+    "role": "assistant",
+    "content": "[tool-call]\n[\n  {\n    \"tool_call_id\": \"call_1\",\n    \"name\": \"lookup_weather\",\n    \"arguments\": {\n      \"city\": \"서울\"\n    }\n  }\n]"
+  },
+  {
+    "role": "user",
+    "content": "[tool-result]\n{\n  \"tool_call_id\": \"call_1\",\n  \"content\": \"{\\\"temp_c\\\":21,\\\"condition\\\":\\\"sunny\\\"}\"\n}"
+  }
+]
+```
+
+이 상태에서 모델은:
+- plain text로 바로 답변하거나,
+- 추가 정보가 필요하면 다시 `[tool-call]` + JSON 본문을 출력할 수 있습니다.
 
 ## 구조
 
@@ -175,6 +221,7 @@ import type { ProviderAdapter } from './types.js';
 const myProvider: ProviderAdapter = {
   name: 'acme',
   modelPrefix: 'acme',
+  supportsNativeToolCalling: true,
   async listModels(context) {
     const auth = context.headers.authorization;
 

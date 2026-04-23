@@ -66,6 +66,37 @@ function buildAssistantContent(
     throw new OpenAIProxyError(502, 'server_error', 'Dummy provider failed on purpose.', 'dummy_upstream_failed');
   }
 
+  const hasToolEmulationInstruction = request.messages.some(
+    (message) =>
+      message.role === 'system' &&
+      typeof message.content === 'string' &&
+      message.content.includes('request a tool call using JSON'),
+  );
+
+  if (hasToolEmulationInstruction) {
+    if (prompt.includes('plain-text-only')) {
+      return `Plain text answer from dummy emulation mode: ${prompt}`;
+    }
+
+    if (prompt.includes('[tool-result]')) {
+      return `Dummy finalized response from tool result.\n${prompt}`;
+    }
+
+    return [
+      '[tool-call]',
+      JSON.stringify(
+        {
+          name: 'lookup_weather',
+          arguments: {
+            query: prompt,
+          },
+        },
+        null,
+        2,
+      ),
+    ].join('\n');
+  }
+
   if (request.model === 'dummy/story-1') {
     return [
       `Dummy story mode received: "${prompt}".`,
@@ -188,6 +219,7 @@ async function* createStream(
 const dummyProvider: ProviderAdapter = {
   name: 'dummy',
   modelPrefix: 'dummy',
+  supportsNativeToolCalling: false,
   async listModels(_context): Promise<ProviderModelDescriptor[]> {
     const created = unixTime();
 

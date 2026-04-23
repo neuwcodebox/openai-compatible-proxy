@@ -12,6 +12,12 @@ import {
   type SupportedChatCompletionRequest,
 } from './openai/schemas.js';
 import {
+  applyToolEmulationResponse,
+  shouldEmulateTools,
+  transformToolEmulationStream,
+  toProviderMessages,
+} from './openai/tool-emulation.js';
+import {
   OpenAIProxyError,
   formatErrorResponse,
   isFastifyValidationError,
@@ -27,21 +33,16 @@ type ModelListResponse = {
 
 function toOpenAIRequest(
   request: SupportedChatCompletionRequest,
+  providerSupportsNativeToolCalling: boolean,
 ): OpenAI.Chat.ChatCompletionCreateParams {
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = request.messages.map((message) => {
-    switch (message.role) {
-      case 'system':
-        return { role: 'system', content: message.content };
-      case 'assistant':
-        return { role: 'assistant', content: message.content };
-      case 'user':
-        return { role: 'user', content: message.content };
-    }
-  });
+  const emulateTools = shouldEmulateTools(request, providerSupportsNativeToolCalling);
+  const messages = toProviderMessages(request, emulateTools);
 
   const base = {
     model: request.model,
     messages,
+    ...(!emulateTools && request.tools ? { tools: request.tools } : {}),
+    ...(!emulateTools && request.tool_choice ? { tool_choice: request.tool_choice } : {}),
   };
 
   const withOptionalFields = {
@@ -171,23 +172,25 @@ export function buildServer(logger?: FastifyBaseLogger): FastifyInstance {
       },
     },
     async (request, reply) => {
-      const input = toOpenAIRequest(request.body);
+      const provider = resolveProvider(request.body.model);
+      const emulateTools = shouldEmulateTools(request.body, provider.supportsNativeToolCalling);
+      const input = toOpenAIRequest(request.body, provider.supportsNativeToolCalling);
       const context = createProviderContext({
         headers: request.headers as IncomingHttpHeaders,
         requestId: request.id,
         signal: createAbortSignal(request, reply),
         logger: request.log,
       });
-      const provider = resolveProvider(input.model);
 
       if (request.body.stream) {
         const stream = provider.streamChatCompletion(input, context);
-        await writeChatCompletionStream(reply, stream);
+        const outputStream = emulateTools ? transformToolEmulationStream(stream) : stream;
+        await writeChatCompletionStream(reply, outputStream);
         return reply;
       }
 
       const completion = await provider.createChatCompletion(input, context);
-      reply.send(completion);
+      reply.send(applyToolEmulationResponse(completion, emulateTools));
       return reply;
     },
   );
