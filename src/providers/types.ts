@@ -14,6 +14,7 @@ export type ProviderContext = {
 export type ProviderAdapter = {
   name: string;
   modelPrefix: string;
+  supportsNativeToolCalling: boolean;
   listModels(context: ProviderContext): Promise<ProviderModelDescriptor[]>;
   createChatCompletion(
     request: OpenAI.Chat.ChatCompletionCreateParams,
